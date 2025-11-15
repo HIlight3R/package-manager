@@ -19,16 +19,20 @@ version = 2.31.0
 mode = real
 
 # Если mode = real, используется repo_url
-repo_url = https://pypi.org/simple/
+repo_url = https://pypi.org/pypi
 
 # Если mode = test, используется test_repo_path
 test_repo_path = ./test_repo.txt
 
 # Режим ASCII-дерева:
 # true/false, yes/no, 1/0
-ascii_tree = true
+ascii_tree = false
 ```
 
 ## Этапы работы
 ### Этап 1
 Создано минимальное настраиваемое CLI-приложение.
+
+### Этап 2
+Реализована основная логика получения данных о зависимостях для их
+дальнейшего анализа и визуализации.

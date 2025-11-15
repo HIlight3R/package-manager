@@ -3,10 +3,17 @@ import configparser
 import os
 import sys
 from dataclasses import dataclass
+from typing import Optional
+from urllib import request, error
+import json
 
 
 class ConfigError(Exception):
     """Базовая ошибка конфигурации."""
+
+
+class DependencyFetchError(Exception):
+    """Ошибка при получении зависимостей пакета."""
 
 
 @dataclass
@@ -14,8 +21,8 @@ class AppConfig:
     package_name: str
     version: str
     mode: str  # "real" или "test"
-    repo_url: str | None
-    test_repo_path: str | None
+    repo_url: Optional[str]
+    test_repo_path: Optional[str]
     ascii_tree: bool
 
 
@@ -28,8 +35,10 @@ def parse_bool(value: str) -> bool:
         return True
     if v in false_values:
         return False
-    raise ConfigError(f"Некорректное булево значение: {value!r}. "
-                      f"Ожидалось одно из: {', '.join(sorted(true_values | false_values))}")
+    raise ConfigError(
+        f"Некорректное булево значение: {value!r}. "
+        f"Ожидалось одно из: {', '.join(sorted(true_values | false_values))}"
+    )
 
 
 def validate_version(version: str) -> None:
@@ -86,8 +95,8 @@ def load_config(path: str) -> AppConfig:
         )
 
     # 4. URL реального репозитория или путь к тестовому
-    repo_url = None
-    test_repo_path = None
+    repo_url: Optional[str] = None
+    test_repo_path: Optional[str] = None
 
     if mode == "real":
         repo_url = section.get("repo_url", "").strip()
@@ -95,7 +104,7 @@ def load_config(path: str) -> AppConfig:
             raise ConfigError(
                 "Режим 'real': параметр 'repo_url' обязателен и не может быть пустым."
             )
-        # Тут можно добавить простую проверку вида URL (начинается с http)
+        # Простая проверка: URL должен начинаться с http
         if not (repo_url.startswith("http://") or repo_url.startswith("https://")):
             raise ConfigError(
                 f"Некорректный 'repo_url': {repo_url!r}. "
@@ -132,7 +141,7 @@ def print_config(config: AppConfig) -> None:
     Вывод всех параметров в формате ключ = значение.
     Для удобства выводим "плоский" список без секций.
     """
-    data: dict[str, str] = {
+    data = {
         "package_name": config.package_name,
         "version": config.version,
         "mode": config.mode,
@@ -145,9 +154,111 @@ def print_config(config: AppConfig) -> None:
         print(f"{key} = {value}")
 
 
+def build_metadata_url(config: AppConfig) -> str:
+    """
+    Для формата pip используем JSON API PyPI-подобного репозитория.
+    Ожидаем, что repo_url указывает на базовый URL API или корень,
+    к которому можно добавить /<name>/<version>/json.
+    """
+    if config.mode != "real":
+        raise DependencyFetchError(
+            "Получение данных о зависимостях поддерживается только в режиме 'real' на Этапе 2."
+        )
+
+    base = (config.repo_url or "").rstrip("/")
+    # типичный случай: https://pypi.org/pypi
+    return f"{base}/{config.package_name}/{config.version}/json"
+
+
+def fetch_metadata_json(url: str) -> dict:
+    try:
+        with request.urlopen(url) as resp:
+            if resp.status != 200:
+                raise DependencyFetchError(
+                    f"Сервер вернул статус {resp.status} при запросе {url!r}"
+                )
+            content_type = resp.headers.get("Content-Type", "")
+            # Проверка типа содержимого не критична, но полезна
+            data = resp.read()
+    except error.HTTPError as e:
+        raise DependencyFetchError(
+            f"HTTP ошибка при запросе {url!r}: {e.code} {e.reason}"
+        ) from e
+    except error.URLError as e:
+        raise DependencyFetchError(
+            f"Ошибка сети при запросе {url!r}: {e.reason}"
+        ) from e
+    except Exception as e:
+        raise DependencyFetchError(
+            f"Неожиданная ошибка при запросе {url!r}: {e}"
+        ) from e
+
+    try:
+        return json.loads(data.decode("utf-8"))
+    except json.JSONDecodeError as e:
+        raise DependencyFetchError(
+            f"Не удалось разобрать JSON-ответ от {url!r}: {e}"
+        ) from e
+
+
+def parse_direct_dependencies(metadata: dict) -> list[str]:
+    """
+    Извлекает прямые зависимости из JSON-ответа PyPI.
+    Ориентируемся на поле info.requires_dist (PEP 345 / 566).
+    """
+    info = metadata.get("info")
+    if not isinstance(info, dict):
+        raise DependencyFetchError("Неверный формат метаданных: отсутствует объект 'info'.")
+
+    requires = info.get("requires_dist")
+    if requires is None:
+        # метаданные без указания зависимостей
+        return []
+
+    if not isinstance(requires, list):
+        raise DependencyFetchError(
+            "Неверный формат метаданных: 'requires_dist' должен быть списком."
+        )
+
+    dependencies: list[str] = []
+    for item in requires:
+        if not isinstance(item, str):
+            continue
+
+        # Примеры строк:
+        # "urllib3 (<3,>=1.21.1)"
+        # "socks ; extra == 'socks'"
+        # "idna (<4,>=2.5)"
+        base_part = item.split(";", 1)[0].strip()
+        if not base_part:
+            continue
+        dependencies.append(base_part)
+
+    return dependencies
+
+
+def print_direct_dependencies(config: AppConfig) -> None:
+    url = build_metadata_url(config)
+    metadata = fetch_metadata_json(url)
+    deps = parse_direct_dependencies(metadata)
+
+    print()  # пустая строка для читаемости
+    print(f"Прямые зависимости пакета {config.package_name}=={config.version}:")
+    if not deps:
+        print("  (нет прямых зависимостей)")
+        return
+
+    for dep in deps:
+        print(f"  - {dep}")
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(
-        description="Инструмент визуализации графа зависимостей (Этап 1: конфигурация)."
+        description=(
+            "Инструмент визуализации графа зависимостей.\n"
+            "Этап 1: загрузка и валидация конфигурации.\n"
+            "Этап 2: получение прямых зависимостей пакета."
+        )
     )
     parser.add_argument(
         "-c",
@@ -155,6 +266,12 @@ def main() -> None:
         default="config.ini",
         help="Путь к INI файлу конфигурации (по умолчанию: config.ini)",
     )
+    parser.add_argument(
+        "--no-config-print",
+        action="store_true",
+        help="Не выводить параметры конфигурации (для этапа 2 можно отключить).",
+    )
+
     args = parser.parse_args()
 
     try:
@@ -163,12 +280,21 @@ def main() -> None:
         print(f"Ошибка конфигурации: {e}", file=sys.stderr)
         sys.exit(1)
     except Exception as e:
-        # На всякий случай общий catch, чтобы показать неожиданные ошибки
-        print(f"Необработанная ошибка: {e}", file=sys.stderr)
+        print(f"Необработанная ошибка при чтении конфигурации: {e}", file=sys.stderr)
         sys.exit(1)
 
-    # Для Этапа 1 просто выводим все параметры в формате ключ = значение
-    print_config(config)
+    if not args.no_config_print:
+        print_config(config)
+
+    # Этап 2: получение прямых зависимостей и вывод на экран
+    try:
+        print_direct_dependencies(config)
+    except DependencyFetchError as e:
+        print(f"Ошибка получения зависимостей: {e}", file=sys.stderr)
+        sys.exit(1)
+    except Exception as e:
+        print(f"Необработанная ошибка при получении зависимостей: {e}", file=sys.stderr)
+        sys.exit(1)
 
 
 if __name__ == "__main__":
