@@ -36,25 +36,19 @@ def parse_bool(value: str) -> bool:
         return True
     if v in false_values:
         return False
-    raise ConfigError(
-        f"Некорректное булево значение: {value!r}. "
-        f"Ожидалось одно из: {', '.join(sorted(true_values | false_values))}"
-    )
+    raise ConfigError(f"Некорректное булево значение: {value!r}. "
+                      f"Ожидалось одно из: {', '.join(sorted(true_values | false_values))}")
 
 
 def validate_version(version: str) -> None:
     parts = version.split(".")
     if not 2 <= len(parts) <= 3:
-        raise ConfigError(
-            f"Некорректная версия пакета: {version!r}. "
-            "Ожидался формат X.Y или X.Y.Z"
-        )
+        raise ConfigError(f"Некорректная версия пакета: {version!r}. "
+                          "Ожидался формат X.Y или X.Y.Z")
     for p in parts:
         if not p.isdigit():
-            raise ConfigError(
-                f"Некорректная версия пакета: {version!r}. "
-                "Части версии должны быть числами."
-            )
+            raise ConfigError(f"Некорректная версия пакета: {version!r}. "
+                              "Части версии должны быть числами.")
 
 
 def load_config(path: str) -> AppConfig:
@@ -86,10 +80,8 @@ def load_config(path: str) -> AppConfig:
 
     mode = section.get("mode", "").strip().lower()
     if mode not in {"real", "test"}:
-        raise ConfigError(
-            f"Некорректный режим работы 'mode': {mode!r}. "
-            "Допустимые значения: 'real' или 'test'."
-        )
+        raise ConfigError(f"Некорректный режим работы 'mode': {mode!r}. "
+                          "Допустимые значения: 'real' или 'test'.")
 
     repo_url: Optional[str] = None
     test_repo_path: Optional[str] = None
@@ -99,60 +91,41 @@ def load_config(path: str) -> AppConfig:
         if not repo_url:
             raise ConfigError("Режим 'real': параметр 'repo_url' обязателен.")
         if not (repo_url.startswith("http://") or repo_url.startswith("https://")):
-            raise ConfigError(
-                f"Некорректный 'repo_url': {repo_url!r}. "
-                "Ожидался URL, начинающийся с 'http://' или 'https://'."
-            )
+            raise ConfigError(f"Некорректный 'repo_url': {repo_url!r}. "
+                              "Ожидался URL, начинающийся с 'http://' или 'https://'.")
 
     elif mode == "test":
         test_repo_path = section.get("test_repo_path", "").strip()
         if not test_repo_path:
             raise ConfigError("Режим 'test': параметр 'test_repo_path' обязателен.")
         if not os.path.exists(test_repo_path):
-            raise ConfigError(
-                f"Режим 'test': файл тестового репозитория не найден: {test_repo_path}"
-            )
+            raise ConfigError(f"Режим 'test': файл тестового репозитория не найден: {test_repo_path}")
 
     ascii_tree_raw = section.get("ascii_tree", "false")
     ascii_tree = parse_bool(ascii_tree_raw)
 
-    return AppConfig(
-        package_name=package_name,
-        version=version,
-        mode=mode,
-        repo_url=repo_url,
-        test_repo_path=test_repo_path,
-        ascii_tree=ascii_tree,
-    )
+    return AppConfig(package_name=package_name, version=version, mode=mode, repo_url=repo_url,
+        test_repo_path=test_repo_path, ascii_tree=ascii_tree, )
 
 
 def print_config(config: AppConfig) -> None:
-    data = {
-        "package_name": config.package_name,
-        "version": config.version,
-        "mode": config.mode,
-        "repo_url": config.repo_url or "",
-        "test_repo_path": config.test_repo_path or "",
-        "ascii_tree": str(config.ascii_tree).lower(),
-    }
+    data = {"package_name": config.package_name, "version": config.version, "mode": config.mode,
+        "repo_url": config.repo_url or "", "test_repo_path": config.test_repo_path or "",
+        "ascii_tree": str(config.ascii_tree).lower(), }
     for key, value in data.items():
         print(f"{key} = {value}")
 
 
 def build_metadata_url_for_root(config: AppConfig) -> str:
     if config.mode != "real":
-        raise DependencyFetchError(
-            "Получение данных возможно только в режиме 'real'."
-        )
+        raise DependencyFetchError("Получение данных возможно только в режиме 'real'.")
     base = (config.repo_url or "").rstrip("/")
     return f"{base}/{config.package_name}/{config.version}/json"
 
 
 def build_metadata_url_latest(config: AppConfig, package_name: str) -> str:
     if config.mode != "real":
-        raise DependencyFetchError(
-            "Получение данных возможно только в режиме 'real'."
-        )
+        raise DependencyFetchError("Получение данных возможно только в режиме 'real'.")
     base = (config.repo_url or "").rstrip("/")
     return f"{base}/{package_name}/json"
 
@@ -161,25 +134,17 @@ def fetch_metadata_json(url: str) -> dict:
     try:
         with request.urlopen(url) as resp:
             if resp.status != 200:
-                raise DependencyFetchError(
-                    f"Сервер вернул статус {resp.status} при запросе {url!r}"
-                )
+                raise DependencyFetchError(f"Сервер вернул статус {resp.status} при запросе {url!r}")
             data = resp.read()
     except error.HTTPError as e:
-        raise DependencyFetchError(
-            f"HTTP ошибка при запросе {url!r}: {e.code} {e.reason}"
-        ) from e
+        raise DependencyFetchError(f"HTTP ошибка при запросе {url!r}: {e.code} {e.reason}") from e
     except error.URLError as e:
-        raise DependencyFetchError(
-            f"Ошибка сети при запросе {url!r}: {e.reason}"
-        ) from e
+        raise DependencyFetchError(f"Ошибка сети при запросе {url!r}: {e.reason}") from e
 
     try:
         return json.loads(data.decode("utf-8"))
     except json.JSONDecodeError as e:
-        raise DependencyFetchError(
-            f"Не удалось разобрать JSON-ответ от {url!r}: {e}"
-        ) from e
+        raise DependencyFetchError(f"Не удалось разобрать JSON-ответ от {url!r}: {e}") from e
 
 
 def parse_direct_dependencies_raw(metadata: dict) -> list[str]:
@@ -236,10 +201,8 @@ def print_direct_dependencies(config: AppConfig) -> None:
             print(f"  - {dep}")
 
 
-def bfs_recursive(
-        start_nodes: Iterable[str],
-        get_neighbors: Callable[[str], Iterable[str]]
-) -> Tuple[dict[str, set[str]], set[Tuple[str, str]]]:
+def bfs_recursive(start_nodes: Iterable[str], get_neighbors: Callable[[str], Iterable[str]]) -> Tuple[
+    dict[str, set[str]], set[Tuple[str, str]]]:
     graph: dict[str, set[str]] = {}
     visited: set[str] = set()
     cycles: set[Tuple[str, str]] = set()
@@ -282,22 +245,16 @@ def load_test_repo_graph(path: str) -> dict[str, list[str]]:
                 if not stripped or stripped.startswith("#"):
                     continue
                 if ":" not in stripped:
-                    raise DependencyFetchError(
-                        f"Ошибка в строке {lineno}: ожидалось 'A: B C'."
-                    )
+                    raise DependencyFetchError(f"Ошибка в строке {lineno}: ожидалось 'A: B C'.")
                 name_part, deps_part = stripped.split(":", 1)
                 name = name_part.strip()
                 if not name.isalpha() or not name.isupper():
-                    raise DependencyFetchError(
-                        f"Некорректное имя пакета '{name}' в строке {lineno}."
-                    )
+                    raise DependencyFetchError(f"Некорректное имя пакета '{name}' в строке {lineno}.")
                 deps_raw = deps_part.replace(",", " ").split()
                 deps = []
                 for d in deps_raw:
                     if not d.isalpha() or not d.isupper():
-                        raise DependencyFetchError(
-                            f"Некорректная зависимость '{d}' в строке {lineno}."
-                        )
+                        raise DependencyFetchError(f"Некорректная зависимость '{d}' в строке {lineno}.")
                     deps.append(d)
                 graph[name] = deps
 
@@ -337,9 +294,7 @@ def build_dependency_graph_test(config: AppConfig) -> Tuple[dict[str, set[str]],
     repo_graph = load_test_repo_graph(config.test_repo_path)
 
     if config.package_name not in repo_graph:
-        raise DependencyFetchError(
-            f"Пакет {config.package_name!r} отсутствует в тестовом репозитории."
-        )
+        raise DependencyFetchError(f"Пакет {config.package_name!r} отсутствует в тестовом репозитории.")
 
     def get_neighbors(pkg: str) -> list[str]:
         return repo_graph.get(pkg, [])
@@ -347,11 +302,7 @@ def build_dependency_graph_test(config: AppConfig) -> Tuple[dict[str, set[str]],
     return bfs_recursive([config.package_name], get_neighbors)
 
 
-def print_dependency_graph(
-        graph: dict[str, set[str]],
-        cycles: set[Tuple[str, str]],
-        root: str
-) -> None:
+def print_dependency_graph(graph: dict[str, set[str]], cycles: set[Tuple[str, str]], root: str) -> None:
     print()
     print("Граф зависимостей:")
     print(f"Корневой пакет: {root}\n")
@@ -386,10 +337,7 @@ def build_reverse_graph(graph: dict[str, set[str]]) -> dict[str, set[str]]:
 def print_reverse_dependencies(graph: dict[str, set[str]], root: str) -> None:
     reverse_graph = build_reverse_graph(graph)
 
-    subgraph, _ = bfs_recursive(
-        [root],
-        lambda node: reverse_graph.get(node, set())
-    )
+    subgraph, _ = bfs_recursive([root], lambda node: reverse_graph.get(node, set()))
 
     dependents = sorted(n for n in subgraph.keys() if n != root)
 
@@ -405,11 +353,8 @@ def print_reverse_dependencies(graph: dict[str, set[str]], root: str) -> None:
 # ---------- Graphviz (DOT) ----------
 
 def build_graphviz_dot(graph: dict[str, set[str]], root: str) -> str:
-    lines: list[str] = []
-    lines.append("digraph dependencies {")
-    lines.append(f'  label="Dependencies for {root}";')
-    lines.append("  labelloc=top;")
-    lines.append("  node [shape=ellipse];")
+    lines: list[str] = ["digraph dependencies {", f'  label="Dependencies for {root}";', "  labelloc=top;",
+                        "  node [shape=ellipse];"]
 
     # Явно выводим узлы без рёбер, чтобы они появились на диаграмме
     all_nodes = set(graph.keys()) | {n for deps in graph.values() for n in deps}
@@ -459,27 +404,11 @@ def print_ascii_tree(graph: dict[str, set[str]], root: str) -> None:
 # ---------- main ----------
 
 def main() -> None:
-    parser = argparse.ArgumentParser(
-        description=(
-            "Инструмент визуализации графа зависимостей.\n"
-            "Поддерживает этапы 1–5."
-        )
-    )
-    parser.add_argument(
-        "-c", "--config",
-        default="config.ini",
-        help="Путь к INI файлу конфигурации"
-    )
-    parser.add_argument(
-        "--no-config-print",
-        action="store_true",
-        help="Не выводить параметры конфигурации"
-    )
-    parser.add_argument(
-        "--reverse-deps",
-        action="store_true",
-        help="Вывести обратные зависимости для пакета"
-    )
+    parser = argparse.ArgumentParser(description=("Инструмент визуализации графа зависимостей.\n"
+                                                  "Поддерживает этапы 1–5."))
+    parser.add_argument("-c", "--config", default="config.ini", help="Путь к INI файлу конфигурации")
+    parser.add_argument("--no-config-print", action="store_true", help="Не выводить параметры конфигурации")
+    parser.add_argument("--reverse-deps", action="store_true", help="Вывести обратные зависимости для пакета")
 
     args = parser.parse_args()
 
