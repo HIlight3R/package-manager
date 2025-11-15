@@ -372,10 +372,6 @@ def print_dependency_graph(
         print("Циклические зависимости не обнаружены.")
 
 
-# -------------------------
-# РЕВЕРСНЫЕ ЗАВИСИМОСТИ
-# -------------------------
-
 def build_reverse_graph(graph: dict[str, set[str]]) -> dict[str, set[str]]:
     reverse: dict[str, set[str]] = {}
 
@@ -406,13 +402,67 @@ def print_reverse_dependencies(graph: dict[str, set[str]], root: str) -> None:
             print(f"  - {pkg}")
 
 
-# -------------------------
+# ---------- Graphviz (DOT) ----------
+
+def build_graphviz_dot(graph: dict[str, set[str]], root: str) -> str:
+    lines: list[str] = []
+    lines.append("digraph dependencies {")
+    lines.append(f'  label="Dependencies for {root}";')
+    lines.append("  labelloc=top;")
+    lines.append("  node [shape=ellipse];")
+
+    # Явно выводим узлы без рёбер, чтобы они появились на диаграмме
+    all_nodes = set(graph.keys()) | {n for deps in graph.values() for n in deps}
+    for node in sorted(all_nodes):
+        lines.append(f'  "{node}";')
+
+    for u in sorted(graph.keys()):
+        for v in sorted(graph[u]):
+            lines.append(f'  "{u}" -> "{v}";')
+
+    lines.append("}")
+    return "\n".join(lines)
+
+
+def print_graphviz_dot(graph: dict[str, set[str]], root: str) -> None:
+    print()
+    print("Представление графа в формате Graphviz (DOT):")
+    dot = build_graphviz_dot(graph, root)
+    print(dot)
+
+
+# ---------- ASCII-дерево ----------
+
+def print_ascii_tree(graph: dict[str, set[str]], root: str) -> None:
+    print()
+    print("ASCII-дерево зависимостей:")
+    print(root)
+
+    def _print_children(node: str, prefix: str, path: set[str]) -> None:
+        children = sorted(graph.get(node, set()))
+        for idx, child in enumerate(children):
+            is_last = (idx == len(children) - 1)
+            connector = "└── " if is_last else "├── "
+            line_prefix = prefix + connector
+
+            if child in path:
+                print(f"{line_prefix}{child} (cycle)")
+                continue
+
+            print(f"{line_prefix}{child}")
+            new_prefix = prefix + ("    " if is_last else "│   ")
+            _print_children(child, new_prefix, path | {child})
+
+    _print_children(root, "", {root})
+
+
+# ---------- main ----------
 
 def main() -> None:
     parser = argparse.ArgumentParser(
         description=(
             "Инструмент визуализации графа зависимостей.\n"
-            "Поддерживает этапы 1–4."
+            "Поддерживает этапы 1–5."
         )
     )
     parser.add_argument(
@@ -455,6 +505,10 @@ def main() -> None:
             graph, cycles = build_dependency_graph_test(config)
 
         print_dependency_graph(graph, cycles, config.package_name)
+        print_graphviz_dot(graph, config.package_name)
+
+        if config.ascii_tree:
+            print_ascii_tree(graph, config.package_name)
 
         if args.reverse_deps:
             print_reverse_dependencies(graph, config.package_name)
